@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const app = express();
 const dotenv = require("dotenv");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 app.use(cors());
 app.use(express.json());
 dotenv.config();
@@ -26,6 +26,7 @@ async function run() {
     const usersCollection = db.collection("user");
     const classesCollection = db.collection("classes");
     const forumsCollection = db.collection("forums");
+    const bookingsCollection = db.collection("bookings");
 
     //database collections are ended here
     //---------------------------------------
@@ -52,6 +53,26 @@ async function run() {
     });
 
     //this api is protected with jwt token
+    app.get("/api/classes/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await classesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!result) {
+          return res.status(404).send({ message: "Class not found" });
+        }
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          message: "Failed to fetch class",
+          error: error.message,
+        });
+      }
+    });
     app.get("/api/classes/trainer/:trainerId", async (req, res) => {
       const trainerId = req.params.trainerId;
       const query = {
@@ -70,6 +91,34 @@ async function run() {
     });
     //api routes are ended here
     //---------------------------------------
+
+    // booking api is created here
+    app.get("/api/bookings/check", async (req, res) => {
+      try {
+        const { classId, email } = req.query;
+
+        const booking = await bookingsCollection.findOne({
+          classId,
+          email,
+        });
+
+        res.send({
+          alreadyBooked: !!booking,
+        });
+      } catch (error) {
+        res.status(500).send({
+          message: "Failed to check booking",
+        });
+      }
+    });
+
+    app.post("/api/bookings", async (req, res) => {
+      const newBooking = req.body;
+      const result = await bookingsCollection.insertOne(newBooking);
+      res.send(result);
+    });
+
+    //--------------------------------
 
     await client.db("admin").command({ ping: 1 });
     console.log(
