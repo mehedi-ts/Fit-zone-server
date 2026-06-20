@@ -25,17 +25,43 @@ async function run() {
     const db = client.db("fitzone");
     const usersCollection = db.collection("user");
     const classesCollection = db.collection("classes");
+    const forumsCollection = db.collection("forums");
 
     //database collections are ended here
-
+    //---------------------------------------
     //api routes are created here
+
+    // this api is public not protected with jwt token
     app.post("/api/classes", async (req, res) => {
       const newClass = req.body;
       const result = await classesCollection.insertOne(newClass);
       res.send(result);
     });
+    app.post("/api/forums", async (req, res) => {
+      const newForum = req.body;
+      const result = await forumsCollection.insertOne(newForum);
+      res.send(result);
+    });
+    app.get("/api/forums", async (req, res) => {
+      const result = await forumsCollection.find().toArray();
+      res.send(result);
+    });
+    app.get("/api/classes", async (req, res) => {
+      const result = await classesCollection.find().toArray();
+      res.send(result);
+    });
 
+    //this api is protected with jwt token
+    app.get("/api/classes/trainer/:trainerId", async (req, res) => {
+      const trainerId = req.params.trainerId;
+      const query = {
+        trainerId: trainerId,
+      };
+      const result = await classesCollection.find(query).toArray();
+      res.send(result);
+    });
     //api routes are ended here
+    //---------------------------------------
 
     await client.db("admin").command({ ping: 1 });
     console.log(
@@ -43,7 +69,7 @@ async function run() {
     );
   } finally {
     // Ensures that the client will close when you finish/error
-    await client.close();
+    // await client.close();
   }
 }
 run().catch(console.dir);
