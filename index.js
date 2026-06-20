@@ -60,6 +60,14 @@ async function run() {
       const result = await classesCollection.find(query).toArray();
       res.send(result);
     });
+    app.get("/api/forums/user/:userId", async (req, res) => {
+      const userId = req.params.userId;
+      const query = {
+        authorId: userId,
+      };
+      const result = await forumsCollection.find(query).toArray();
+      res.send(result);
+    });
     //api routes are ended here
     //---------------------------------------
 
