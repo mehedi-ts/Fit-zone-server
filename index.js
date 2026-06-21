@@ -93,29 +93,54 @@ async function run() {
     //---------------------------------------
 
     // booking api is created here
-    app.get("/api/bookings/check", async (req, res) => {
-      try {
-        const { classId, email } = req.query;
+    app.get("/api/check-booked", async (req, res) => {
+      const { classId, userId } = req.query;
 
-        const booking = await bookingsCollection.findOne({
+      const booking = await bookingsCollection.findOne({
+        classId,
+        userId,
+      });
+
+      res.send({
+        alreadyBooked: !!booking,
+      });
+    });
+
+    app.post("/api/bookings", async (req, res) => {
+      try {
+        const newBooking = req.body;
+
+        const { classId, email } = newBooking;
+
+        // check already booked
+        const existingBooking = await bookingsCollection.findOne({
           classId,
           email,
         });
 
+        if (existingBooking) {
+          return res.send({
+            success: true,
+            alreadyBooked: true,
+            message: "Already booked",
+          });
+        }
+
+        // insert new booking
+        const result = await bookingsCollection.insertOne(newBooking);
+
         res.send({
-          alreadyBooked: !!booking,
+          success: true,
+          alreadyBooked: false,
+          message: "Booking successful",
+          result,
         });
       } catch (error) {
         res.status(500).send({
-          message: "Failed to check booking",
+          success: false,
+          message: error.message,
         });
       }
-    });
-
-    app.post("/api/bookings", async (req, res) => {
-      const newBooking = req.body;
-      const result = await bookingsCollection.insertOne(newBooking);
-      res.send(result);
     });
 
     //--------------------------------
