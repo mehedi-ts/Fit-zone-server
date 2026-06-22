@@ -142,7 +142,53 @@ async function run() {
         });
       }
     });
+    app.get("/api/bookings/user/:userId", async (req, res) => {
+      try {
+        const userId = req.params.userId;
 
+        const result = await bookingsCollection
+          .aggregate([
+            {
+              $match: { userId },
+            },
+            {
+              $addFields: {
+                classObjectId: {
+                  $toObjectId: "$classId",
+                },
+              },
+            },
+            {
+              $lookup: {
+                from: "classes",
+                localField: "classObjectId",
+                foreignField: "_id",
+                as: "classInfo",
+              },
+            },
+            {
+              $unwind: {
+                path: "$classInfo",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $project: {
+                classObjectId: 0,
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch bookings",
+        });
+      }
+    });
     //--------------------------------
 
     await client.db("admin").command({ ping: 1 });
