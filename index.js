@@ -27,6 +27,7 @@ async function run() {
     const classesCollection = db.collection("classes");
     const forumsCollection = db.collection("forums");
     const bookingsCollection = db.collection("bookings");
+    const trainerApplicationsCollection = db.collection("trainerApplications");
 
     //database collections are ended here
     //---------------------------------------
@@ -190,6 +191,43 @@ async function run() {
       }
     });
     //--------------------------------
+
+    // api for user
+
+    app.post("/api/apply-trainer", async (req, res) => {
+      try {
+        const application = req.body;
+
+        const existingApplication = await trainerApplicationsCollection.findOne(
+          {
+            userId: application.userId,
+          },
+        );
+
+        if (existingApplication) {
+          return res.status(409).send({
+            success: false,
+            message: "You have already applied as a trainer",
+          });
+        }
+
+        application.status = "pending";
+        application.createdAt = new Date();
+
+        const result =
+          await trainerApplicationsCollection.insertOne(application);
+
+        res.send({
+          success: true,
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log(
