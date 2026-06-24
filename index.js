@@ -28,6 +28,7 @@ async function run() {
     const forumsCollection = db.collection("forums");
     const bookingsCollection = db.collection("bookings");
     const trainerApplicationsCollection = db.collection("trainerApplications");
+    const favoritesCollection = db.collection("favoritesClasses");
 
     //database collections are ended here
     //---------------------------------------
@@ -228,7 +229,127 @@ async function run() {
         });
       }
     });
+    app.get("/api/trainer-application/user/:userId", async (req, res) => {
+      try {
+        const userId = req.params.userId;
 
+        const result = await trainerApplicationsCollection.findOne({
+          userId,
+        });
+
+        res.send(result || {});
+      } catch (error) {
+        console.error(error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch trainer application",
+        });
+      }
+    });
+
+    app.post("/favorites", async (req, res) => {
+      try {
+        const { userId, classId } = req.body;
+
+        const alreadyExist = await favoritesCollection.findOne({
+          userId,
+          classId,
+        });
+
+        if (alreadyExist) {
+          return res.send({
+            success: false,
+            message: "Already added",
+          });
+        }
+
+        const result = await favoritesCollection.insertOne({
+          userId,
+          classId,
+          createdAt: new Date(),
+        });
+
+        res.send({
+          success: true,
+          message: "Added to favorites",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    app.delete("/favorites", async (req, res) => {
+      try {
+        const { userId, classId } = req.body;
+
+        const result = await favoritesCollection.deleteOne({
+          userId,
+          classId,
+        });
+
+        res.send({
+          success: true,
+          message: "Removed from favorites",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    app.get("/favorites/:userId", async (req, res) => {
+      try {
+        const userId = req.params.userId;
+
+        const favorites = await favoritesCollection
+          .find({
+            userId,
+          })
+          .toArray();
+
+        const classIds = favorites.map((item) => new ObjectId(item.classId));
+
+        const classes = await classesCollection
+          .find({
+            _id: {
+              $in: classIds,
+            },
+          })
+          .toArray();
+
+        res.send(classes);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    app.delete("/favorites/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await favoritesCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({
+          success: false,
+          message: "Failed to delete favorite class",
+        });
+      }
+    });
+
+    //----------------------------------------
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
