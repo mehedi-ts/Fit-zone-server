@@ -430,6 +430,106 @@ async function run() {
         res.status(500).send({ message: error.message });
       }
     });
+    app.patch("/trainer-applications/:id/approve", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const application = await trainerApplicationsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!application) {
+          return res.status(404).send({ message: "Application not found" });
+        }
+
+        await usersCollection.updateOne(
+          { _id: new ObjectId(application.userId) },
+          {
+            $set: {
+              role: "Trainer",
+            },
+          },
+        );
+
+        const result = await trainerApplicationsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "Approved",
+            },
+          },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          message: error.message,
+        });
+      }
+    });
+    app.patch("/trainer-applications/:id/reject", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { feedback } = req.body;
+
+        const result = await trainerApplicationsCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+          },
+          {
+            $set: {
+              status: "Rejected",
+              feedback,
+            },
+          },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          message: error.message,
+        });
+      }
+    });
+
+    // GET all trainers (users with role "Trainer")
+    app.get("/api/trainers", async (req, res) => {
+      try {
+        const result = await usersCollection
+          .find({ role: "trainer" })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // PATCH demote trainer to regular user
+    app.patch("/trainers/:id/demote", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              role: "user",
+            },
+          },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
 
     //----------------------------------------
     await client.db("admin").command({ ping: 1 });
