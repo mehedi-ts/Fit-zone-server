@@ -114,7 +114,6 @@ async function run() {
 
         const { classId, email } = newBooking;
 
-        // check already booked
         const existingBooking = await bookingsCollection.findOne({
           classId,
           email,
@@ -128,7 +127,9 @@ async function run() {
           });
         }
 
-        // insert new booking
+        // ✅ date add করো
+        newBooking.createdAt = new Date();
+
         const result = await bookingsCollection.insertOne(newBooking);
 
         res.send({
@@ -521,6 +522,103 @@ async function run() {
             },
           },
         );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    // PATCH approve a pending class
+    app.patch("/classes/:id/approve", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await classesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "approved",
+            },
+          },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // PATCH reject a pending class
+    app.patch("/classes/:id/reject", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await classesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "rejected",
+            },
+          },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // DELETE a class
+    app.delete("/classes/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await classesCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // DELETE a forum post
+    app.delete("/api/forums/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await forumsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    // GET all transactions (bookings with payment info)
+    app.get("/api/transactions", async (req, res) => {
+      try {
+        const result = await bookingsCollection
+          .find({ stripeSessionId: { $exists: true } })
+          .sort({ createdAt: -1 })
+          .toArray();
 
         res.send(result);
       } catch (error) {
