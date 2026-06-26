@@ -49,9 +49,125 @@ async function run() {
       const result = await forumsCollection.find().toArray();
       res.send(result);
     });
+    app.get("/api/forums/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const forum = await forumsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!forum) {
+          return res.status(404).send({
+            success: false,
+            message: "Forum not found",
+          });
+        }
+
+        res.send(forum);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+   
+app.get("/api/forum/latest", async (req, res) => {
+  try {
+  
+    const limitCount = parseInt(req.query.limit) || 3;
+
+    const result = await forumsCollection
+      .find()
+      .sort({ createdAt: -1 }) 
+      .toArray();
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({
+      success: false,
+      message: "Latest forum posts problem",
+      error: error.message,
+    });
+  }
+});
     app.get("/api/classes", async (req, res) => {
       const result = await classesCollection.find().toArray();
       res.send(result);
+    });
+    app.get("/api/classes/featured", async (req, res) => {
+      try {
+        const result = await classesCollection
+          .aggregate([
+            // শুধু approved class
+            {
+              $match: {
+                status: "approved",
+              },
+            },
+
+            // booking lookup
+            {
+              $lookup: {
+                from: "bookings",
+                let: {
+                  classId: { $toString: "$_id" },
+                },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ["$classId", "$$classId"] },
+                          { $eq: ["$paymentStatus", "paid"] },
+                        ],
+                      },
+                    },
+                  },
+                ],
+                as: "bookings",
+              },
+            },
+
+            // booking count + _id কে string এ convert
+            {
+              $addFields: {
+                id: { $toString: "$_id" },
+                bookingCount: {
+                  $size: "$bookings",
+                },
+              },
+            },
+
+            // বেশি booking যেগুলোর, সেগুলো আগে
+            {
+              $sort: {
+                bookingCount: -1,
+              },
+            },
+
+            // ৮টা class (loop mode এর জন্য slidesPerView * 2 দরকার)
+            {
+              $limit: 6,
+            },
+
+            // bookings array response থেকে বাদ
+            {
+              $project: {
+                bookings: 0,
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
     });
 
     //this api is protected with jwt token
@@ -422,7 +538,7 @@ async function run() {
     app.get("/api/trainer-applications/pending", async (req, res) => {
       try {
         const result = await trainerApplicationsCollection
-          .find({ status: "Pending" })
+          .find({ status: "pending" })
           .sort({ createdAt: -1 })
           .toArray();
 
@@ -447,7 +563,7 @@ async function run() {
           { _id: new ObjectId(application.userId) },
           {
             $set: {
-              role: "Trainer",
+              role: "trainer",
             },
           },
         );
