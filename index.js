@@ -3,6 +3,7 @@ const cors = require("cors");
 const app = express();
 const dotenv = require("dotenv");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
 app.use(cors());
 app.use(express.json());
 dotenv.config();
@@ -17,6 +18,34 @@ const client = new MongoClient(MONGODB_URI, {
     deprecationErrors: true,
   },
 });
+
+//jwt
+
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.CLIENT_URL}/api/auth/jwks`),
+);
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req?.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    console.log(payload);
+
+    next();
+  } catch (error) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+};
+
+//jwt
 
 async function run() {
   try {
@@ -72,26 +101,25 @@ async function run() {
         });
       }
     });
-   
-app.get("/api/forum/latest", async (req, res) => {
-  try {
-  
-    const limitCount = parseInt(req.query.limit) || 3;
 
-    const result = await forumsCollection
-      .find()
-      .sort({ createdAt: -1 }) 
-      .toArray();
+    app.get("/api/forum/latest", async (req, res) => {
+      try {
+        const limitCount = parseInt(req.query.limit) || 3;
 
-    res.send(result);
-  } catch (error) {
-    res.status(500).send({
-      success: false,
-      message: "Latest forum posts problem",
-      error: error.message,
+        const result = await forumsCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Latest forum posts problem",
+          error: error.message,
+        });
+      }
     });
-  }
-});
     app.get("/api/classes", async (req, res) => {
       const result = await classesCollection.find().toArray();
       res.send(result);
