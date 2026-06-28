@@ -38,6 +38,7 @@ const verifyToken = async (req, res, next) => {
   try {
     const { payload } = await jwtVerify(token, JWKS);
     console.log(payload);
+    req.user = payload;
 
     next();
   } catch (error) {
@@ -58,6 +59,93 @@ async function run() {
     const bookingsCollection = db.collection("bookings");
     const trainerApplicationsCollection = db.collection("trainerApplications");
     const favoritesCollection = db.collection("favoritesClasses");
+
+    ///
+    const checkBlockedUser = async (req, res, next) => {
+      try {
+        const email = req.user.email;
+
+        const user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        if (user.status === "blocked") {
+          return res.status(403).json({
+            success: false,
+            message: "Your account has been blocked.",
+          });
+        }
+
+        next();
+      } catch (error) {
+        return res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
+    };
+    const verifyAdmin = async (req, res, next) => {
+      try {
+        const email = req.user.email;
+
+        const user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        if (user.role !== "admin") {
+          return res.status(403).json({
+            success: false,
+            message: "Admin access only.",
+          });
+        }
+
+        next();
+      } catch (error) {
+        return res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
+    };
+    const verifyTrainer = async (req, res, next) => {
+      try {
+        const email = req.user.email;
+
+        const user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        if (user.role !== "trainer") {
+          return res.status(403).json({
+            success: false,
+            message: "Trainer access only.",
+          });
+        }
+
+        next();
+      } catch (error) {
+        return res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
+    };
+    ///
 
     //database collections are ended here
     //---------------------------------------
@@ -239,7 +327,7 @@ async function run() {
     //---------------------------------------
 
     // booking api is created here
-    app.get("/api/check-booked", async (req, res) => {
+    app.get("/api/check-booked", verifyToken, async (req, res) => {
       const { classId, userId } = req.query;
 
       const booking = await bookingsCollection.findOne({
@@ -289,7 +377,7 @@ async function run() {
         });
       }
     });
-    app.get("/api/bookings/user/:userId", async (req, res) => {
+    app.get("/api/bookings/user/:userId", verifyToken, async (req, res) => {
       try {
         const userId = req.params.userId;
 
@@ -393,7 +481,7 @@ async function run() {
       }
     });
 
-    app.post("/favorites", async (req, res) => {
+    app.post("/favorites", verifyToken, async (req, res) => {
       try {
         const { userId, classId } = req.body;
 
@@ -427,7 +515,7 @@ async function run() {
         });
       }
     });
-    app.delete("/favorites", async (req, res) => {
+    app.delete("/favorites", verifyToken, async (req, res) => {
       try {
         const { userId, classId } = req.body;
 
@@ -435,6 +523,13 @@ async function run() {
           userId,
           classId,
         });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Favorite not found",
+          });
+        }
 
         res.send({
           success: true,
@@ -448,7 +543,25 @@ async function run() {
         });
       }
     });
-    app.get("/favorites/:userId", async (req, res) => {
+
+    app.get("/favorites/check", verifyToken, async (req, res) => {
+      try {
+        const { classId, userId } = req.query;
+
+        const result = await favoritesCollection.findOne({ userId, classId });
+
+        res.send({
+          success: true,
+          isFavorited: !!result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    app.get("/favorites/:userId", verifyToken, async (req, res) => {
       try {
         const userId = req.params.userId;
 
