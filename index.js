@@ -152,10 +152,30 @@ async function run() {
     //api routes are created here
 
     // this api is public not protected with jwt token
-    app.post("/api/classes", async (req, res) => {
-      const newClass = req.body;
-      const result = await classesCollection.insertOne(newClass);
-      res.send(result);
+    app.post("/api/classes", verifyToken, verifyTrainer, async (req, res) => {
+      try {
+        const newClass = req.body;
+
+        const result = await classesCollection.insertOne(newClass);
+
+        if (!result.insertedId) {
+          return res.status(400).send({
+            success: false,
+            message: "Class not created",
+          });
+        }
+
+        res.status(201).send({
+          success: true,
+          message: "Class created successfully",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message || "Server error",
+        });
+      }
     });
     app.post("/api/forums", async (req, res) => {
       const newForum = req.body;
@@ -307,22 +327,32 @@ async function run() {
         });
       }
     });
-    app.get("/api/classes/trainer/:trainerId", async (req, res) => {
-      const trainerId = req.params.trainerId;
-      const query = {
-        trainerId: trainerId,
-      };
-      const result = await classesCollection.find(query).toArray();
-      res.send(result);
-    });
-    app.get("/api/forums/user/:userId", async (req, res) => {
-      const userId = req.params.userId;
-      const query = {
-        authorId: userId,
-      };
-      const result = await forumsCollection.find(query).toArray();
-      res.send(result);
-    });
+    app.get(
+      "/api/classes/trainer/:trainerId",
+      verifyToken,
+
+      async (req, res) => {
+        const trainerId = req.params.trainerId;
+        const query = {
+          trainerId: trainerId,
+        };
+        const result = await classesCollection.find(query).toArray();
+        res.send(result);
+      },
+    );
+    app.get(
+      "/api/forums/user/:userId",
+      verifyToken,
+
+      async (req, res) => {
+        const userId = req.params.userId;
+        const query = {
+          authorId: userId,
+        };
+        const result = await forumsCollection.find(query).toArray();
+        res.send(result);
+      },
+    );
     //api routes are ended here
     //---------------------------------------
 
@@ -340,43 +370,48 @@ async function run() {
       });
     });
 
-    app.post("/api/bookings", async (req, res) => {
-      try {
-        const newBooking = req.body;
+    app.post(
+      "/api/bookings",
+      verifyToken,
+      checkBlockedUser,
+      async (req, res) => {
+        try {
+          const newBooking = req.body;
 
-        const { classId, email } = newBooking;
+          const { classId, email } = newBooking;
 
-        const existingBooking = await bookingsCollection.findOne({
-          classId,
-          email,
-        });
+          const existingBooking = await bookingsCollection.findOne({
+            classId,
+            email,
+          });
 
-        if (existingBooking) {
-          return res.send({
+          if (existingBooking) {
+            return res.send({
+              success: true,
+              alreadyBooked: true,
+              message: "Already booked",
+            });
+          }
+
+          // ✅ date add করো
+          newBooking.createdAt = new Date();
+
+          const result = await bookingsCollection.insertOne(newBooking);
+
+          res.send({
             success: true,
-            alreadyBooked: true,
-            message: "Already booked",
+            alreadyBooked: false,
+            message: "Booking successful",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: error.message,
           });
         }
-
-        // ✅ date add করো
-        newBooking.createdAt = new Date();
-
-        const result = await bookingsCollection.insertOne(newBooking);
-
-        res.send({
-          success: true,
-          alreadyBooked: false,
-          message: "Booking successful",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
+      },
+    );
     app.get("/api/bookings/user/:userId", verifyToken, async (req, res) => {
       try {
         const userId = req.params.userId;
@@ -428,60 +463,68 @@ async function run() {
 
     // api for user
 
-    app.post("/api/apply-trainer", async (req, res) => {
-      try {
-        const application = req.body;
+    app.post(
+      "/api/apply-trainer",
+      verifyToken,
+      checkBlockedUser,
+      async (req, res) => {
+        try {
+          const application = req.body;
 
-        const existingApplication = await trainerApplicationsCollection.findOne(
-          {
-            userId: application.userId,
-          },
-        );
+          const existingApplication =
+            await trainerApplicationsCollection.findOne({
+              userId: application.userId,
+            });
 
-        if (existingApplication) {
-          return res.status(409).send({
+          if (existingApplication) {
+            return res.status(409).send({
+              success: false,
+              message: "You have already applied as a trainer",
+            });
+          }
+
+          application.status = "pending";
+          application.createdAt = new Date();
+
+          const result =
+            await trainerApplicationsCollection.insertOne(application);
+
+          res.send({
+            success: true,
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
             success: false,
-            message: "You have already applied as a trainer",
+            message: error.message,
           });
         }
+      },
+    );
+    app.get(
+      "/api/trainer-application/user/:userId",
+      verifyToken,
+      async (req, res) => {
+        try {
+          const userId = req.params.userId;
 
-        application.status = "pending";
-        application.createdAt = new Date();
+          const result = await trainerApplicationsCollection.findOne({
+            userId,
+          });
 
-        const result =
-          await trainerApplicationsCollection.insertOne(application);
+          res.send(result || {});
+        } catch (error) {
+          console.error(error);
 
-        res.send({
-          success: true,
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
-    app.get("/api/trainer-application/user/:userId", async (req, res) => {
-      try {
-        const userId = req.params.userId;
+          res.status(500).send({
+            success: false,
+            message: "Failed to fetch trainer application",
+          });
+        }
+      },
+    );
 
-        const result = await trainerApplicationsCollection.findOne({
-          userId,
-        });
-
-        res.send(result || {});
-      } catch (error) {
-        console.error(error);
-
-        res.status(500).send({
-          success: false,
-          message: "Failed to fetch trainer application",
-        });
-      }
-    });
-
-    app.post("/favorites", verifyToken, async (req, res) => {
+    app.post("/favorites", verifyToken, checkBlockedUser, async (req, res) => {
       try {
         const { userId, classId } = req.body;
 
@@ -515,34 +558,39 @@ async function run() {
         });
       }
     });
-    app.delete("/favorites", verifyToken, async (req, res) => {
-      try {
-        const { userId, classId } = req.body;
+    app.delete(
+      "/favorites",
+      verifyToken,
+      checkBlockedUser,
+      async (req, res) => {
+        try {
+          const { userId, classId } = req.body;
 
-        const result = await favoritesCollection.deleteOne({
-          userId,
-          classId,
-        });
+          const result = await favoritesCollection.deleteOne({
+            userId,
+            classId,
+          });
 
-        if (result.deletedCount === 0) {
-          return res.status(404).send({
+          if (result.deletedCount === 0) {
+            return res.status(404).send({
+              success: false,
+              message: "Favorite not found",
+            });
+          }
+
+          res.send({
+            success: true,
+            message: "Removed from favorites",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
             success: false,
-            message: "Favorite not found",
+            message: error.message,
           });
         }
-
-        res.send({
-          success: true,
-          message: "Removed from favorites",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
+      },
+    );
 
     app.get("/favorites/check", verifyToken, async (req, res) => {
       try {
