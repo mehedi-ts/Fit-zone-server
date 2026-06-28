@@ -50,7 +50,7 @@ const verifyToken = async (req, res, next) => {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     //database collections are created here
     const db = client.db("fitzone");
     const usersCollection = db.collection("user");
@@ -59,6 +59,8 @@ async function run() {
     const bookingsCollection = db.collection("bookings");
     const trainerApplicationsCollection = db.collection("trainerApplications");
     const favoritesCollection = db.collection("favoritesClasses");
+    const likesCollection = db.collection("likes");
+const commentsCollection = db.collection("comments");
 
     ///
     const checkBlockedUser = async (req, res, next) => {
@@ -228,10 +230,81 @@ async function run() {
         });
       }
     });
-    app.get("/api/classes", async (req, res) => {
-      const result = await classesCollection.find().toArray();
-      res.send(result);
+app.get("/api/classes", async (req, res) => {
+  try {
+    const { search, category, page = 1, limit = 6 } = req.query;
+
+    const pageNum = Math.max(parseInt(page) || 1, 1);
+    const limitNum = Math.max(parseInt(limit) || 6, 1);
+    const skip = (pageNum - 1) * limitNum;
+
+    let matchQuery = {
+      status: "approved",
+    };
+
+    if (search) {
+      matchQuery.className = {
+        $regex: search,
+        $options: "i",
+      };
+    }
+
+    if (category) {
+      matchQuery.category = {
+        $regex: `^${category}$`,
+        $options: "i",
+      };
+    }
+
+    const totalCount = await classesCollection.countDocuments(matchQuery);
+
+    const result = await classesCollection
+      .aggregate([
+        { $match: matchQuery },
+        { $skip: skip },
+        { $limit: limitNum },
+        {
+          $lookup: {
+            from: "bookings",
+            let: { classId: { $toString: "$_id" } },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$classId", "$$classId"] },
+                      { $eq: ["$paymentStatus", "paid"] },
+                    ],
+                  },
+                },
+              },
+            ],
+            as: "bookings",
+          },
+        },
+        {
+          $addFields: {
+            bookingCount: { $size: "$bookings" },
+          },
+        },
+        {
+          $project: {
+            bookings: 0,
+          },
+        },
+      ])
+      .toArray();
+
+    res.send({
+      classes: result,
+      totalCount,
+      totalPages: Math.ceil(totalCount / limitNum),
+      currentPage: pageNum,
     });
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
     app.get("/api/classes/featured", async (req, res) => {
       try {
         const result = await classesCollection
@@ -328,18 +401,53 @@ async function run() {
       }
     });
     app.get(
-      "/api/classes/trainer/:trainerId",
-      verifyToken,
+  "/api/classes/trainer/:trainerId",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const trainerId = req.params.trainerId;
 
-      async (req, res) => {
-        const trainerId = req.params.trainerId;
-        const query = {
-          trainerId: trainerId,
-        };
-        const result = await classesCollection.find(query).toArray();
-        res.send(result);
-      },
-    );
+      const result = await classesCollection
+        .aggregate([
+          { $match: { trainerId } },
+          {
+            $lookup: {
+              from: "bookings",
+              let: { classId: { $toString: "$_id" } },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ["$classId", "$$classId"] },
+                        { $eq: ["$paymentStatus", "paid"] },
+                      ],
+                    },
+                  },
+                },
+                {
+                  $project: {
+                    name: 1,
+                    email: 1,
+                    _id: 0,
+                  },
+                },
+              ],
+              as: "students",
+            },
+          },
+        ])
+        .toArray();
+
+      res.send(result);
+    } catch (error) {
+      res.status(500).send({
+        success: false,
+        message: error.message,
+      });
+    }
+  },
+);
     app.get(
       "/api/forums/user/:userId",
       verifyToken,
@@ -655,148 +763,183 @@ async function run() {
       }
     });
     // api for admin
+app.get("/admin/classes",verifyToken,verifyAdmin, async (req, res) => {
+  const result = await classesCollection.find().toArray();
+  res.send(result);
+});
 
-    app.get("/api/users", async (req, res) => {
+
+    app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
-    app.patch("/users/:id/block", async (req, res) => {
-      try {
-        const { id } = req.params;
+    app.patch(
+      "/users/:id/block",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
 
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              status: "blocked",
+          const result = await usersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                status: "blocked",
+              },
             },
-          },
-        );
+          );
 
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
-    app.patch("/users/:id/unblock", async (req, res) => {
-      try {
-        const { id } = req.params;
-
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              status: "active",
-            },
-          },
-        );
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
-    app.patch("/users/:id/make-admin", async (req, res) => {
-      try {
-        const { id } = req.params;
-
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              role: "admin",
-            },
-          },
-        );
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
-
-    app.get("/api/trainer-applications/pending", async (req, res) => {
-      try {
-        const result = await trainerApplicationsCollection
-          .find({ status: "pending" })
-          .sort({ createdAt: -1 })
-          .toArray();
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-    app.patch("/trainer-applications/:id/approve", async (req, res) => {
-      try {
-        const { id } = req.params;
-
-        const application = await trainerApplicationsCollection.findOne({
-          _id: new ObjectId(id),
-        });
-
-        if (!application) {
-          return res.status(404).send({ message: "Application not found" });
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: error.message,
+          });
         }
+      },
+    );
+    app.patch(
+      "/users/:id/unblock",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
 
-        await usersCollection.updateOne(
-          { _id: new ObjectId(application.userId) },
-          {
-            $set: {
-              role: "trainer",
+          const result = await usersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                status: "active",
+              },
             },
-          },
-        );
+          );
 
-        const result = await trainerApplicationsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              status: "Approved",
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: error.message,
+          });
+        }
+      },
+    );
+    app.patch(
+      "/users/:id/make-admin",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+
+          const result = await usersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                role: "admin",
+              },
             },
-          },
-        );
+          );
 
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          message: error.message,
-        });
-      }
-    });
-    app.patch("/trainer-applications/:id/reject", async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { feedback } = req.body;
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: error.message,
+          });
+        }
+      },
+    );
 
-        const result = await trainerApplicationsCollection.updateOne(
-          {
+    app.get(
+      "/api/trainer-applications/pending",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await trainerApplicationsCollection
+            .find({ status: "pending" })
+            .sort({ createdAt: -1 })
+            .toArray();
+
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
+        }
+      },
+    );
+    app.patch(
+      "/trainer-applications/:id/approve",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+
+          const application = await trainerApplicationsCollection.findOne({
             _id: new ObjectId(id),
-          },
-          {
-            $set: {
-              status: "Rejected",
-              feedback,
-            },
-          },
-        );
+          });
 
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          message: error.message,
-        });
-      }
-    });
+          if (!application) {
+            return res.status(404).send({ message: "Application not found" });
+          }
+
+          await usersCollection.updateOne(
+            { _id: new ObjectId(application.userId) },
+            {
+              $set: {
+                role: "trainer",
+              },
+            },
+          );
+
+          const result = await trainerApplicationsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                status: "Approved",
+              },
+            },
+          );
+
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({
+            message: error.message,
+          });
+        }
+      },
+    );
+    app.patch(
+      "/trainer-applications/:id/reject",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { feedback } = req.body;
+
+          const result = await trainerApplicationsCollection.updateOne(
+            {
+              _id: new ObjectId(id),
+            },
+            {
+              $set: {
+                status: "Rejected",
+                feedback,
+              },
+            },
+          );
+
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({
+            message: error.message,
+          });
+        }
+      },
+    );
 
     // GET all trainers (users with role "Trainer")
     app.get("/api/trainers", async (req, res) => {
@@ -815,7 +958,7 @@ async function run() {
     });
 
     // PATCH demote trainer to regular user
-    app.patch("/trainers/:id/demote", async (req, res) => {
+    app.patch("/trainers/:id/demote",verifyToken,verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -823,7 +966,7 @@ async function run() {
           { _id: new ObjectId(id) },
           {
             $set: {
-              role: "user",
+              role: "member",
             },
           },
         );
@@ -837,7 +980,7 @@ async function run() {
       }
     });
     // PATCH approve a pending class
-    app.patch("/classes/:id/approve", async (req, res) => {
+    app.patch("/classes/:id/approve",verifyToken,verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -860,7 +1003,7 @@ async function run() {
     });
 
     // PATCH reject a pending class
-    app.patch("/classes/:id/reject", async (req, res) => {
+    app.patch("/classes/:id/reject",verifyToken,verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -883,7 +1026,7 @@ async function run() {
     });
 
     // DELETE a class
-    app.delete("/classes/:id", async (req, res) => {
+    app.delete("/classes/:id",verifyToken,verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -901,7 +1044,7 @@ async function run() {
     });
 
     // DELETE a forum post
-    app.delete("/api/forums/:id", async (req, res) => {
+    app.delete("/api/forums/:id",verifyToken,verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -918,7 +1061,7 @@ async function run() {
       }
     });
     // GET all transactions (bookings with payment info)
-    app.get("/api/transactions", async (req, res) => {
+    app.get("/api/transactions",verifyToken,verifyAdmin, async (req, res) => {
       try {
         const result = await bookingsCollection
           .find({ stripeSessionId: { $exists: true } })
@@ -934,11 +1077,365 @@ async function run() {
       }
     });
 
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+    // ============ LIKES ============
+
+// Get like/dislike summary + current user's vote for a forum
+app.get("/api/forums/:forumId/likes", async (req, res) => {
+  try {
+    const { forumId } = req.params;
+    const { userId } = req.query;
+
+    const likesCount = await likesCollection.countDocuments({
+      forumId,
+      type: "like",
+    });
+    const dislikesCount = await likesCollection.countDocuments({
+      forumId,
+      type: "dislike",
+    });
+
+    let userVote = null;
+    if (userId) {
+      const existing = await likesCollection.findOne({ forumId, userId });
+      userVote = existing?.type || null;
+    }
+
+    res.send({ likesCount, dislikesCount, userVote });
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// Toggle like or dislike for a forum
+app.post("/api/forums/:forumId/likes", async (req, res) => {
+  try {
+    const { forumId } = req.params;
+    const { userId, type } = req.body; // type: "like" | "dislike"
+
+    if (!userId || !["like", "dislike"].includes(type)) {
+      return res.status(400).send({ message: "Invalid request" });
+    }
+
+    const existing = await likesCollection.findOne({ forumId, userId });
+
+    if (!existing) {
+      // No previous vote -> create one
+      await likesCollection.insertOne({
+        forumId,
+        userId,
+        type,
+        createdAt: new Date(),
+      });
+    } else if (existing.type === type) {
+      // Same vote clicked again -> remove (un-vote)
+      await likesCollection.deleteOne({ _id: existing._id });
+    } else {
+      // Switching vote (like -> dislike or vice versa)
+      await likesCollection.updateOne(
+        { _id: existing._id },
+        { $set: { type } }
+      );
+    }
+
+    const likesCount = await likesCollection.countDocuments({
+      forumId,
+      type: "like",
+    });
+    const dislikesCount = await likesCollection.countDocuments({
+      forumId,
+      type: "dislike",
+    });
+    const updated = await likesCollection.findOne({ forumId, userId });
+
+    res.send({
+      likesCount,
+      dislikesCount,
+      userVote: updated?.type || null,
+    });
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// ============ COMMENTS ============
+
+// Get all comments for a forum
+app.get("/api/forums/:forumId/comments", async (req, res) => {
+  try {
+    const { forumId } = req.params;
+
+    const comments = await commentsCollection
+      .find({ forumId })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(comments);
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// Add a comment to a forum
+app.post("/api/forums/:forumId/comments", async (req, res) => {
+  try {
+    const { forumId } = req.params;
+    const { userId, userName, userImage, text } = req.body;
+
+    if (!userId || !text?.trim()) {
+      return res.status(400).send({ message: "Invalid request" });
+    }
+
+    const comment = {
+      forumId,
+      userId,
+      userName,
+      userImage: userImage || null,
+      text: text.trim(),
+      createdAt: new Date(),
+    };
+
+    const result = await commentsCollection.insertOne(comment);
+
+    res.send({ ...comment, _id: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// Delete a comment (only by the comment's author)
+app.delete("/api/forums/comments/:commentId", async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const { userId } = req.body;
+
+    const comment = await commentsCollection.findOne({
+      _id: new ObjectId(commentId),
+    });
+
+    if (!comment) {
+      return res.status(404).send({ message: "Comment not found" });
+    }
+
+    if (comment.userId !== userId) {
+      return res.status(403).send({ message: "Not authorized" });
+    }
+
+    await commentsCollection.deleteOne({ _id: new ObjectId(commentId) });
+
+    res.send({ deletedCount: 1 });
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+    
+    ////////////////////////////////////////////////////////////////////
+    // ============ DASHBOARD STATS ============
+
+    app.get("/api/member-stats/:userId", verifyToken, async (req, res) => {
+      try {
+        const { userId } = req.params;
+
+        const totalBookedClasses = await bookingsCollection.countDocuments({
+          userId,
+        });
+        const totalFavorites = await favoritesCollection.countDocuments({
+          userId,
+        });
+
+        res.send({
+          totalBookedClasses,
+          totalFavorites,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+   app.get(
+  "/api/trainer-stats/:trainerId",
+  verifyToken,
+  verifyTrainer,
+  async (req, res) => {
+    try {
+      const { trainerId } = req.params;
+      
+      const formattedTrainerId = trainerId.startsWith("TR-")
+        ? trainerId
+        : `TR-${trainerId}`;
+
+      const totalClassesCreated = await classesCollection.countDocuments({
+        trainerId: formattedTrainerId,
+      });
+
+      const result = await classesCollection
+        .aggregate([
+          { $match: { trainerId: formattedTrainerId } },
+          {
+            $lookup: {
+              from: "bookings",
+              let: { classId: { $toString: "$_id" } },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ["$classId", "$$classId"] },
+                        { $eq: ["$paymentStatus", "paid"] },
+                      ],
+                    },
+                  },
+                },
+              ],
+              as: "bookings",
+            },
+          },
+          {
+            $project: {
+              studentCount: { $size: "$bookings" },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalStudentsEnrolled: { $sum: "$studentCount" },
+            },
+          },
+        ])
+        .toArray();
+
+      const totalStudentsEnrolled = result[0]?.totalStudentsEnrolled || 0;
+
+      res.send({
+        totalClassesCreated,
+        totalStudentsEnrolled,
+      });
+    } catch (error) {
+      res.status(500).send({
+        success: false,
+        message: error.message,
+      });
+    }
+  },
+);
+
+    app.get("/api/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const totalUsers = await usersCollection.countDocuments();
+        const totalClasses = await classesCollection.countDocuments();
+        const totalBookedClasses = await bookingsCollection.countDocuments();
+
+        res.send({
+          totalUsers,
+          totalClasses,
+          totalBookedClasses,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ============ END DASHBOARD STATS ============
+    
+    
+    app.delete("/api/classes/:id", verifyToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const email = req.user.email;
+
+        const user = await usersCollection.findOne({ email });
+
+        const existingClass = await classesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!existingClass) {
+          return res.status(404).send({
+            success: false,
+            message: "Class not found",
+          });
+        }
+
+        const isOwnerTrainer =
+          user?.role === "trainer" &&
+          existingClass.trainerId === `TR-${user._id.toString()}`;
+        const isAdmin = user?.role === "admin";
+
+        if (!isOwnerTrainer && !isAdmin) {
+          return res.status(403).send({
+            success: false,
+            message: "Not authorized to delete this class",
+          });
+        }
+
+        const result = await classesCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    app.patch("/classes/:id", verifyToken, verifyTrainer, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const existingClass = await classesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!existingClass) {
+          return res.status(404).send({
+            success: false,
+            message: "Class not found",
+          });
+        }
+
+        const trainerId = `TR-${req.user.id}`; // ✅ এটা ঠিক আছে
+        if (existingClass.trainerId !== trainerId) {
+          return res.status(403).send({
+            success: false,
+            message: "You can only edit your own classes",
+          });
+        }
+
+        const result = await classesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    
+    
+    
+    
+    
+
+
     //----------------------------------------
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!",
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
