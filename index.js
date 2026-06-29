@@ -1044,7 +1044,7 @@ app.get("/admin/classes",verifyToken,verifyAdmin, async (req, res) => {
     });
 
     // DELETE a forum post
-    app.delete("/api/forums/:id",verifyToken,verifyAdmin, async (req, res) => {
+    app.delete("/api/forums/:id",verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -1444,7 +1444,7 @@ app.delete("/api/forums/comments/:commentId", async (req, res) => {
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
-  res.send("Fit Zone Server is running");
+  res.send("Fit Zone Server is running.......");
 });
 
 app.listen(port, () => {
