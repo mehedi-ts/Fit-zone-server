@@ -1078,7 +1078,7 @@ app.get("/admin/classes",verifyToken,verifyAdmin, async (req, res) => {
     });
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
-    // ============ LIKES ============
+// ============ LIKES ============
 
 // Get like/dislike summary + current user's vote for a forum
 app.get("/api/forums/:forumId/likes", async (req, res) => {
@@ -1160,7 +1160,7 @@ app.post("/api/forums/:forumId/likes", async (req, res) => {
 
 // ============ COMMENTS ============
 
-// Get all comments for a forum
+// Get all comments for a forum (top-level + replies, flat list with parentId)
 app.get("/api/forums/:forumId/comments", async (req, res) => {
   try {
     const { forumId } = req.params;
@@ -1176,14 +1176,36 @@ app.get("/api/forums/:forumId/comments", async (req, res) => {
   }
 });
 
-// Add a comment to a forum
+// Add a comment to a forum (or a reply, if parentId is provided)
 app.post("/api/forums/:forumId/comments", async (req, res) => {
   try {
     const { forumId } = req.params;
-    const { userId, userName, userImage, text } = req.body;
+    const { userId, userName, userImage, text, parentId } = req.body;
 
     if (!userId || !text?.trim()) {
       return res.status(400).send({ message: "Invalid request" });
+    }
+
+    // Block users whose status is "blocked" (or not "active") from commenting
+    const userDoc = await usersCollection.findOne({
+      $or: [{ _id: userId }, { userId }],
+    });
+
+    if (userDoc?.status === "blocked") {
+      return res.status(403).send({ message: "Action restricted by Admin" });
+    }
+
+    // If this is a reply, make sure the parent comment exists and belongs
+    // to the same forum (and disallow nesting beyond one level)
+    if (parentId) {
+      const parentComment = await commentsCollection.findOne({
+        _id: new ObjectId(parentId),
+        forumId,
+      });
+
+      if (!parentComment) {
+        return res.status(404).send({ message: "Parent comment not found" });
+      }
     }
 
     const comment = {
@@ -1192,12 +1214,51 @@ app.post("/api/forums/:forumId/comments", async (req, res) => {
       userName,
       userImage: userImage || null,
       text: text.trim(),
+      parentId: parentId || null,
+      edited: false,
       createdAt: new Date(),
     };
 
     const result = await commentsCollection.insertOne(comment);
 
     res.send({ ...comment, _id: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// Edit a comment (only by the comment's author)
+app.patch("/api/forums/comments/:commentId", async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const { userId, text } = req.body;
+
+    if (!text?.trim()) {
+      return res.status(400).send({ message: "Invalid request" });
+    }
+
+    const comment = await commentsCollection.findOne({
+      _id: new ObjectId(commentId),
+    });
+
+    if (!comment) {
+      return res.status(404).send({ message: "Comment not found" });
+    }
+
+    if (comment.userId !== userId) {
+      return res.status(403).send({ message: "Not authorized" });
+    }
+
+    await commentsCollection.updateOne(
+      { _id: new ObjectId(commentId) },
+      { $set: { text: text.trim(), edited: true, updatedAt: new Date() } }
+    );
+
+    const updated = await commentsCollection.findOne({
+      _id: new ObjectId(commentId),
+    });
+
+    res.send(updated);
   } catch (error) {
     res.status(500).send({ message: "Server error" });
   }
@@ -1221,6 +1282,8 @@ app.delete("/api/forums/comments/:commentId", async (req, res) => {
       return res.status(403).send({ message: "Not authorized" });
     }
 
+    // Also remove any direct replies to this comment
+    await commentsCollection.deleteMany({ parentId: commentId });
     await commentsCollection.deleteOne({ _id: new ObjectId(commentId) });
 
     res.send({ deletedCount: 1 });
